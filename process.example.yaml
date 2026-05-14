@@ -1,0 +1,34 @@
+variables:
+  - name: PORT
+    value: "3050"
+  - name: TEST_DEPLOY_MESSAGE
+    value: "staging · build 1234"
+
+steps:
+  syntax-check:
+    description: "Node built-in syntax check (node --check); no eslint/npm required"
+    script-path: ./scripts/verify.sh
+    on_failure: abort
+
+  run-test-deploy-app:
+    description: "Start app in background and probe /health"
+    script: |
+      set -euo pipefail
+      test -f app.js
+      if [[ -f /tmp/test-deploy-app.pid ]] && kill -0 "$(cat /tmp/test-deploy-app.pid)" 2>/dev/null; then
+        kill "$(cat /tmp/test-deploy-app.pid)" || true
+        sleep 1
+      fi
+      nohup node app.js >>/tmp/test-deploy-app.log 2>&1 &
+      echo $! >/tmp/test-deploy-app.pid
+      for i in $(seq 1 50); do
+        if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null; then
+          echo "OK: /health"
+          exit 0
+        fi
+        sleep 0.2
+      done
+      echo "Health check failed" >&2
+      exit 1
+    timeout: 3m
+    on_failure: abort

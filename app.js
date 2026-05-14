@@ -5,6 +5,11 @@ const http = require('http');
 const port = Number.parseInt(process.env.PORT || '3050', 10);
 const host = '0.0.0.0';
 
+/** Log interval in ms (set `HEARTBEAT_INTERVAL_MS=0` to disable). */
+const heartbeatMs = Number.parseInt(process.env.HEARTBEAT_INTERVAL_MS || '1000', 10);
+const startedAt = Date.now();
+let heartbeatTick = 0;
+
 /** Custom line on `/` (set e.g. `TEST_DEPLOY_MESSAGE=staging-42` in the environment). */
 const pageMessage = (process.env.TEST_DEPLOY_MESSAGE || '').trim();
 
@@ -181,7 +186,7 @@ const server = http.createServer((req, res) => {
   }
   if (path === '/') {
     const html = pageShell({
-      title: 'Deploy app is up 11',
+      title: 'Deploy app is up',
       subtitle: 'If you see this page, routing and the container runtime look good.',
       badge: 'ok',
       pageMessage,
@@ -194,6 +199,62 @@ const server = http.createServer((req, res) => {
   res.end('Not found\n');
 });
 
+/** @type {ReturnType<typeof setInterval> | undefined} */
+let heartbeatInterval;
+
+function logHeartbeat() {
+  heartbeatTick += 1;
+  const rssMb = (process.memoryUsage().rss / 1024 / 1024).toFixed(1);
+  const uptimeS = Math.floor((Date.now() - startedAt) / 1000);
+  console.log(
+    `[heartbeat] tick=${heartbeatTick} uptime_s=${uptimeS} rss_mb=${rssMb} port=${port} pid=${process.pid}`,
+  );
+}
+
+function stopHeartbeat() {
+  if (heartbeatInterval !== undefined) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = undefined;
+  }
+}
+
 server.listen(port, host, () => {
   console.log(`listening on http://${host}:${port}`);
+  if (heartbeatMs > 0) {
+    logHeartbeat();
+    heartbeatInterval = setInterval(logHeartbeat, heartbeatMs);
+  }
 });
+
+let shuttingDown = false;
+
+function shutdown(signal) {
+  if (shuttingDown) {
+    console.log(`shutdown: ${signal} (force exit)`);
+    process.exit(0);
+  }
+  shuttingDown = true;
+  console.log(`shutdown: ${signal}`);
+  stopHeartbeat();
+
+  server.close((err) => {
+    if (err) {
+      console.error(err);
+    }
+    process.exit(0);
+  });
+
+  if (typeof server.closeAllConnections === 'function') {
+    server.closeAllConnections();
+  } else if (typeof server.closeIdleConnections === 'function') {
+    server.closeIdleConnections();
+  }
+
+  setTimeout(() => {
+    console.error('shutdown: timeout, exiting');
+    process.exit(0);
+  }, 2000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
