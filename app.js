@@ -186,7 +186,7 @@ const server = http.createServer((req, res) => {
   }
   if (path === '/') {
     const html = pageShell({
-      title: 'Deploy app is up Привет!',
+      title: 'Deploy app is up Привет Мир!',
       subtitle: 'If you see this page, routing and the container runtime look good.',
       badge: 'ok',
       pageMessage,
